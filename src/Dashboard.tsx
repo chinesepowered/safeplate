@@ -340,9 +340,9 @@ export function Dashboard() {
 
       {(confirmed > 0 || safeDishes > 0) && (
         <p className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900 ring-1 ring-emerald-600/15">
-          <strong>{confirmed}</strong> restaurant{confirmed === 1 ? "" : "s"} have written back
-          and confirmed <strong>{safeDishes}</strong> dish{safeDishes === 1 ? "" : "es"}{" "}
-          {profile.personName} can order.
+          <strong>{confirmed}</strong> restaurant{confirmed === 1 ? " has" : "s have"} written
+          back and confirmed <strong>{safeDishes}</strong> dish
+          {safeDishes === 1 ? "" : "es"} {profile.personName} can order.
         </p>
       )}
 

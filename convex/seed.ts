@@ -647,6 +647,9 @@ export const copyDemo = mutation({
       .collect();
 
     for (const r of restaurants) {
+      // Skip anything still mid-pipeline in the template: a half-scraped copy
+      // would sit on a spinner forever, because a copy never re-runs the crawl.
+      if (r.status === "scraping" || r.status === "failed") continue;
       const { _id, _creationTime, ...rest } = r;
       const newId = await ctx.db.insert("restaurants", {
         ...rest,

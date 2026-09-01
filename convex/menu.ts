@@ -109,10 +109,17 @@ function normalizeMenu(raw: any): Menu | null {
     if (dishes.length >= 80) break;
   }
   if (!dishes.length) return null;
+  // Extractors say "Not provided" rather than leaving a field out, and that
+  // string would end up on the card as the restaurant's address.
+  const real = (x: string | undefined) =>
+    x && !/^(n\/?a|none|null|unknown|not (provided|listed|specified|available))\.?$/i.test(x)
+      ? x
+      : undefined;
+  const email = real(str(raw.contactEmail, 160)?.toLowerCase());
   return {
-    restaurantName: str(raw.restaurantName, 160),
-    address: str(raw.address, 240),
-    contactEmail: str(raw.contactEmail, 160)?.toLowerCase(),
+    restaurantName: real(str(raw.restaurantName, 160)),
+    address: real(str(raw.address, 240)),
+    contactEmail: email && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? email : undefined,
     dishes,
   };
 }
