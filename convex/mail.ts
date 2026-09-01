@@ -1,7 +1,8 @@
 import { v } from "convex/values";
 import { internalMutation, internalQuery, query } from "./_generated/server";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { internal } from "./_generated/api";
-import { bareAddress, caseCodeFromSubject, normalizeSubject } from "./lib/mailUtil";
+import { bareAddress, caseCodeFromSubject, normalizeSubject, redactEmail } from "./lib/mailUtil";
 
 /**
  * Queries and mutations for email state. Runs in Convex's default runtime, so
@@ -171,12 +172,33 @@ export const deliveryStatus = internalMutation({
 /** Messages that could not be routed. Surfaced on /admin, never dropped. */
 export const unrouted = query({
   args: {},
-  handler: async (ctx) =>
-    await ctx.db
+  handler: async (ctx) => {
+    // Unrouted mail is whatever arrived at the app inbox that we could not
+    // attach to a row — it can contain anything anyone chose to send us. The
+    // live demo signs every visitor in anonymously, so being signed in proves
+    // nothing; only an account with an email (real password sign-in, not the
+    // anonymous provider) may read this, and bodies are truncated and sender
+    // addresses redacted even then.
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return [];
+    const user = await ctx.db.get(userId);
+    if (!user?.email) return [];
+
+    const rows = await ctx.db
       .query("mailMessages")
       .withIndex("by_routed", (q) => q.eq("routed", false))
       .order("desc")
-      .take(50),
+      .take(50);
+
+    return rows.map((m) => ({
+      _id: m._id,
+      at: m.at,
+      subject: m.subject,
+      caseCode: m.caseCode,
+      from: redactEmail(m.from),
+      extractedText: (m.extractedText ?? "").slice(0, 200),
+    }));
+  },
 });
 
 /** One stored email, for the action that reads the reply. */
