@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { internalMutation, internalQuery, query } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { bareAddress, caseCodeFromSubject } from "./lib/mailUtil";
+import { bareAddress, caseCodeFromSubject, normalizeSubject } from "./lib/mailUtil";
 
 /**
  * Queries and mutations for email state. Runs in Convex's default runtime, so
@@ -114,11 +114,19 @@ export const ingest = internalMutation({
       const code = caseCodeFromSubject(args.subject);
       if (code) {
         caseCode = code;
-        const byCode = await ctx.db
+        // A code can cover several enquiries — one profile writes to many
+        // restaurants — so picking any message under it could attach a reply to
+        // the wrong restaurant and re-verdict the wrong menu. Match the subject
+        // of the enquiry we actually sent, and only fall back to the most recent.
+        const candidates = await ctx.db
           .query("mailMessages")
           .withIndex("by_caseCode", (q) => q.eq("caseCode", code))
-          .first();
-        targetId = byCode?.targetId;
+          .order("desc")
+          .take(100);
+        const outbound = candidates.filter((m) => m.direction === "out" && m.targetId);
+        const subject = normalizeSubject(args.subject);
+        const exact = outbound.find((m) => normalizeSubject(m.subject) === subject);
+        targetId = (exact ?? outbound[0])?.targetId;
       }
     }
 

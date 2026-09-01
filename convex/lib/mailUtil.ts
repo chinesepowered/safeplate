@@ -33,3 +33,19 @@ export function bareAddress(from: string): string {
   const m = from.match(/<([^>]+)>/);
   return (m ? m[1] : from).toLowerCase().trim();
 }
+
+/**
+ * A subject line reduced to the part that identifies the conversation: the
+ * demo-override prefix, the [SP-XXXX] routing code and any Re:/Fwd: chain are
+ * all noise. Used to tell two enquiries sent under the same code apart, so a
+ * restaurant's reply lands on the restaurant it actually came from.
+ */
+export function normalizeSubject(subject: string | undefined): string {
+  return (subject ?? "")
+    .replace(/\[to:[^\]]*\]/gi, "")
+    .replace(/\[[A-Z]{2,5}-[A-Z0-9]{4}\]/g, "")
+    .replace(/^\s*((re|fw|fwd|aw|sv)\s*:\s*)+/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}

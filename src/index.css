@@ -1,1 +1,88 @@
+@import "leaflet/dist/leaflet.css";
 @import "tailwindcss";
+
+/* Calm and clinical: one warm neutral ground, four verdict colours, nothing else. */
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: #faf9f7;
+}
+
+/* Leaflet's own chrome, toned down to match the app. */
+.leaflet-container {
+  font: inherit;
+  background: #eae7e2;
+}
+.leaflet-control-attribution {
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.75) !important;
+}
+
+/* Verdict pins. The colour change is the payoff, so it animates. */
+.sp-pin {
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  border: 3px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  transition: background-color 600ms ease, transform 300ms ease;
+}
+.sp-pin-safe {
+  background: #059669;
+}
+.sp-pin-risky {
+  background: #d97706;
+}
+.sp-pin-unsafe {
+  background: #e11d48;
+}
+.sp-pin-unclear {
+  background: #78716c;
+}
+.sp-pin-pending {
+  background: #a8a29e;
+  animation: sp-pulse 1.4s ease-in-out infinite;
+}
+@keyframes sp-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+}
+
+/* Rows arriving from a live query should read as arriving, not blinking. */
+@keyframes sp-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.sp-enter {
+  animation: sp-in 240ms ease-out both;
+}
+
+@media print {
+  .sp-no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+  }
+}

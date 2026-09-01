@@ -86,6 +86,9 @@ export const send = internalAction({
       await ctx.runMutation(internal.restaurants.patchRestaurant, {
         restaurantId,
         status: "asked",
+        // Keep the conversation id on the restaurant: a reply carrying a thread
+        // id then routes straight back here, with no subject matching needed.
+        threadId: res.threadId || undefined,
         askedAt: Date.now(),
         statusDetail: res.redirected
           ? "Sent (redirected to the demo inbox). Waiting for a reply."
