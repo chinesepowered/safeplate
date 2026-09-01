@@ -67,6 +67,56 @@ const MenuFallback = z.object({
     .max(80),
 });
 
+type Menu = {
+  restaurantName?: string;
+  address?: string;
+  contactEmail?: string;
+  dishes: {
+    name: string;
+    description?: string;
+    price?: string;
+    section?: string;
+    ingredients?: string[];
+  }[];
+};
+
+/**
+ * Real menu pages are messy — an extractor will hand back a dish with a numeric
+ * price, a missing name, or an ingredient list of nulls. Rather than throwing
+ * the whole menu away over one bad row, coerce what is usable and drop the rest.
+ */
+function normalizeMenu(raw: any): Menu | null {
+  if (!raw || typeof raw !== "object") return null;
+  const str = (x: unknown, max: number) =>
+    typeof x === "string" && x.trim() ? x.trim().slice(0, max) : undefined;
+  const items = Array.isArray(raw.dishes) ? raw.dishes : [];
+  const dishes: Menu["dishes"] = [];
+  for (const it of items) {
+    if (!it || typeof it !== "object") continue;
+    const name = str(it.name, 120);
+    if (!name) continue;
+    const ing = Array.isArray(it.ingredients)
+      ? it.ingredients.filter((x: unknown) => typeof x === "string" && x.trim()).slice(0, 20)
+      : undefined;
+    dishes.push({
+      name,
+      description: str(it.description, 600),
+      price:
+        str(it.price, 32) ?? (typeof it.price === "number" ? String(it.price) : undefined),
+      section: str(it.section, 80),
+      ingredients: ing?.length ? ing : undefined,
+    });
+    if (dishes.length >= 80) break;
+  }
+  if (!dishes.length) return null;
+  return {
+    restaurantName: str(raw.restaurantName, 160),
+    address: str(raw.address, 240),
+    contactEmail: str(raw.contactEmail, 160)?.toLowerCase(),
+    dishes,
+  };
+}
+
 function looksLikeMenu(url: string): number {
   const u = url.toLowerCase();
   let score = 0;
@@ -182,14 +232,13 @@ export const discover = internalAction({
       });
 
       let markdown = "";
-      let parsed: z.infer<typeof MenuFallback> | null = null;
+      let parsed: Menu | null = null;
 
       try {
         const res = await scrapeJson(menuUrl, menuJsonSchema as any, MENU_PROMPT);
         await ctx.runMutation(internal.usage.bump, { provider: "firecrawl" });
         markdown = res.markdown ?? "";
-        const check = MenuFallback.safeParse(res.json ?? {});
-        if (check.success && check.data.dishes.length) parsed = check.data;
+        parsed = normalizeMenu(res.json);
       } catch {
         // Fall through to markdown + LLM.
       }
@@ -209,21 +258,22 @@ export const discover = internalAction({
           return;
         }
         await rateLimiter.limit(ctx, "globalLlm", { throws: false });
-        parsed = await extract(
+        const llmMenu = await extract(
           MenuFallback,
-          `Menu page text:\n\n${markdown.slice(0, 18000)}`,
+          `Menu page text:\n\n${markdown.slice(0, 12000)}`,
           {
             system:
               "You read restaurant menus. Copy dish names and descriptions exactly as " +
-              "written; never invent ingredients. If the page is not a menu, return an " +
-              "empty dishes array.",
-            maxTokens: 4000,
+              "written; never invent ingredients. Keep each description under 200 " +
+              "characters. If the page is not a menu, return an empty dishes array.",
+            maxTokens: 8000,
           },
         );
         await ctx.runMutation(internal.usage.bump, { provider: "llm" });
+        parsed = normalizeMenu(llmMenu);
       }
 
-      if (!parsed.dishes.length) {
+      if (!parsed || !parsed.dishes.length) {
         await fail(
           ctx,
           args.restaurantId,
@@ -232,16 +282,7 @@ export const discover = internalAction({
         return;
       }
 
-      const dishes = parsed.dishes
-        .filter((d) => d.name?.trim())
-        .slice(0, 80)
-        .map((d) => ({
-          name: d.name.trim().slice(0, 120),
-          description: d.description?.trim().slice(0, 600) || undefined,
-          price: d.price?.trim().slice(0, 32) || undefined,
-          section: d.section?.trim().slice(0, 80) || undefined,
-          ingredients: d.ingredients?.length ? d.ingredients.slice(0, 20) : undefined,
-        }));
+      const dishes = parsed.dishes;
 
       const hash = hashDishes(dishes.map((d) => d.name));
       const changed = Boolean(restaurant.menuHash && restaurant.menuHash !== hash);
@@ -257,9 +298,9 @@ export const discover = internalAction({
 
       await ctx.runMutation(internal.restaurants.patchRestaurant, {
         restaurantId: args.restaurantId,
-        name: parsed.restaurantName?.trim() || name,
-        address: parsed.address?.trim() || undefined,
-        contactEmail: restaurant.contactEmail ?? parsed.contactEmail?.trim().toLowerCase(),
+        name: parsed.restaurantName || name,
+        address: parsed.address,
+        contactEmail: restaurant.contactEmail ?? parsed.contactEmail,
         lat: coords?.lat,
         lng: coords?.lng,
         menuExcerpt: markdown ? excerpt(markdown, 1500) : undefined,

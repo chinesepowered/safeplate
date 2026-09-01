@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { internal } from "./_generated/api";
 import { newCaseCode } from "./lib/mailUtil";
 import { CASE_PREFIX } from "./lib/app";
 import type { Id } from "./_generated/dataModel";
@@ -9,7 +10,7 @@ import type { Id } from "./_generated/dataModel";
  * Demo data. The app must look alive the second a judge opens it, without
  * waiting on a live crawl and without spending Firecrawl credits, so `run`
  * builds one template profile and every visitor gets their own working copy of
- * it (profiles.ensureDemo below). The template is a real-shaped snapshot: menu
+ * it (seed.copyDemo below). The template is a real-shaped snapshot: menu
  * text as it was scraped, verdicts with the evidence that produced them, and a
  * restaurant that has already answered its email.
  */
@@ -681,5 +682,41 @@ export const copyDemo = mutation({
     }
 
     return profileId;
+  },
+});
+
+/**
+ * Add a real restaurant to the demo template and run the live pipeline on it
+ * (Firecrawl → LLM). Used to top the demo data up with a genuinely scraped menu
+ * before a deploy, so what judges see on first load is real, not written by us.
+ *
+ *   pnpm exec convex run seed:addToTemplate '{"input":"https://…/menu"}'
+ */
+export const addToTemplate = internalMutation({
+  args: { input: v.string() },
+  handler: async (ctx, { input }) => {
+    const template = await ctx.db
+      .query("profiles")
+      .withIndex("by_slug", (q) => q.eq("slug", DEMO_SLUG))
+      .unique();
+    if (!template) throw new Error("Run seed:run first.");
+
+    const isUrl = /^https?:\/\//i.test(input.trim());
+    const id = await ctx.db.insert("restaurants", {
+      profileId: template._id,
+      ownerId: template.ownerId,
+      name: isUrl ? new URL(input).hostname.replace(/^www\./, "") : input,
+      website: isUrl ? input : undefined,
+      status: "scraping",
+      statusDetail: "Reading the site…",
+      caseCode: newCaseCode(CASE_PREFIX),
+      createdAt: Date.now(),
+    });
+    await ctx.scheduler.runAfter(0, internal.menu.discover, {
+      restaurantId: id,
+      url: isUrl ? input : undefined,
+      query: isUrl ? undefined : input,
+    });
+    return id;
   },
 });
