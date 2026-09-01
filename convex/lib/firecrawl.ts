@@ -50,6 +50,29 @@ export async function map(url: string, limit = 30): Promise<string[]> {
   return (Array.isArray(links) ? links : []).map((l: any) => (typeof l === "string" ? l : l.url));
 }
 
+/**
+ * Scrape a page and have Firecrawl extract structured JSON from it in the same
+ * call, so a menu page comes back as dish rows rather than markdown we have to
+ * re-parse. Returns the markdown too, so the UI can show where it came from and
+ * the LLM has the raw text to fall back on.
+ */
+export async function scrapeJson(
+  url: string,
+  schema: Record<string, unknown>,
+  prompt: string,
+): Promise<{ markdown: string; json: any; title?: string }> {
+  const res: any = await firecrawl().scrape(url, {
+    formats: ["markdown", { type: "json", prompt, schema }],
+    maxAge: MAX_AGE_MS,
+    onlyMainContent: true,
+  });
+  return {
+    markdown: res?.markdown ?? "",
+    json: res?.json ?? null,
+    title: res?.metadata?.title,
+  };
+}
+
 /** Keep stored page text small: enough for a source preview, not a whole page. */
 export function excerpt(markdown: string, chars = 1500): string {
   return markdown.slice(0, chars);

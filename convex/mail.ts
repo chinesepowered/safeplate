@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { internalMutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { bareAddress, caseCodeFromSubject } from "./lib/mailUtil";
 
@@ -169,4 +169,73 @@ export const unrouted = query({
       .withIndex("by_routed", (q) => q.eq("routed", false))
       .order("desc")
       .take(50),
+});
+
+/** One stored email, for the action that reads the reply. */
+export const getMessage = internalQuery({
+  args: { mailMessageId: v.id("mailMessages") },
+  handler: async (ctx, { mailMessageId }) => await ctx.db.get(mailMessageId),
+});
+
+/** What the reply turned out to be, shown above the thread in the UI. */
+export const setClassification = internalMutation({
+  args: {
+    mailMessageId: v.id("mailMessages"),
+    classification: v.string(),
+    summary: v.optional(v.string()),
+  },
+  handler: async (ctx, { mailMessageId, classification, summary }) => {
+    await ctx.db.patch(mailMessageId, { classification, summary });
+  },
+});
+
+/** Attach an inbound message to a restaurant when routing found it by code. */
+export const routeToTarget = internalMutation({
+  args: { mailMessageId: v.id("mailMessages"), targetId: v.string() },
+  handler: async (ctx, { mailMessageId, targetId }) => {
+    await ctx.db.patch(mailMessageId, { targetId, routed: true });
+  },
+});
+
+/** Restaurant lookup by the [SP-XXXX] code carried in a subject line. */
+export const restaurantByCaseCode = internalQuery({
+  args: { caseCode: v.string() },
+  handler: async (ctx, { caseCode }) => {
+    const r = await ctx.db
+      .query("restaurants")
+      .withIndex("by_caseCode", (q) => q.eq("caseCode", caseCode))
+      .first();
+    return r ? r._id : null;
+  },
+});
+
+/**
+ * Store an email we drafted but could not send (no AgentMail credentials yet,
+ * or a send that failed). It shows in the thread as "not sent", so the work the
+ * app did is still visible and nothing is silently lost.
+ */
+export const recordUnsent = internalMutation({
+  args: {
+    to: v.string(),
+    subject: v.string(),
+    text: v.string(),
+    caseCode: v.optional(v.string()),
+    targetId: v.optional(v.string()),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("mailMessages", {
+      direction: "out",
+      messageId: `draft-${crypto.randomUUID()}`,
+      to: [args.to],
+      subject: args.subject,
+      fullText: args.text,
+      caseCode: args.caseCode,
+      targetId: args.targetId,
+      routed: true,
+      deliveryStatus: "not_sent",
+      summary: args.reason,
+      at: Date.now(),
+    });
+  },
 });
