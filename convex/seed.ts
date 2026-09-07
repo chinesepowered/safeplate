@@ -49,7 +49,15 @@ type SeedRestaurant = {
   address: string;
   lat: number;
   lng: number;
-  status: "scraping" | "reviewed" | "asked" | "confirmed" | "avoid" | "unclear" | "failed";
+  status:
+    | "scraping"
+    | "reviewed"
+    | "asked"
+    | "confirmed"
+    | "avoid"
+    | "unclear"
+    | "failed"
+    | "paused";
   verdict?: "safe" | "risky" | "unsafe" | "unclear";
   verdictReason?: string;
   statusDetail?: string;
@@ -649,7 +657,7 @@ export const copyDemo = mutation({
     for (const r of restaurants) {
       // Skip anything still mid-pipeline in the template: a half-scraped copy
       // would sit on a spinner forever, because a copy never re-runs the crawl.
-      if (r.status === "scraping" || r.status === "failed") continue;
+      if (r.status === "scraping" || r.status === "failed" || r.status === "paused") continue;
       const { _id, _creationTime, ...rest } = r;
       const newId = await ctx.db.insert("restaurants", {
         ...rest,

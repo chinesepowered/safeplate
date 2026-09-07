@@ -1,21 +1,30 @@
 "use node";
 
-import { v } from "convex/values";
-import { internalAction } from "./_generated/server";
+import { v, type Infer } from "convex/values";
+import { internalAction, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { search, map, scrape, scrapeJson, excerpt } from "./lib/firecrawl";
 import { extract, modelId } from "./lib/llm";
 import { geocode } from "./lib/geo";
 import { rateLimiter, isRateLimitError, QUOTA_MESSAGE, assertNotPaused } from "./lib/limits";
+import { statusV } from "./schema";
 
 /**
  * Firecrawl side of the pipeline: find the restaurant, find its menu page, and
  * turn that page into dish rows. Nothing here judges anything — the verdicts
  * are ai.reviewMenu's job. Everything is written through internal mutations, so
  * the UI watches rows appear rather than waiting on a request.
+ *
+ * Every Firecrawl call goes through the gateway in lib/firecrawl.ts, which
+ * serves a saved copy when it has one and refuses to spend when the shared
+ * credit pool is near its floor. A refusal is not a failure: the restaurant
+ * lands in "paused", keeps whatever it already had, and never gains a verdict.
  */
+
+type Status = Infer<typeof statusV>;
 
 /** What Firecrawl is asked to pull out of a menu page. */
 const menuJsonSchema = {
@@ -139,12 +148,40 @@ function hashDishes(names: string[]): string {
   return createHash("sha256").update(names.join("|").toLowerCase()).digest("hex").slice(0, 16);
 }
 
-async function fail(ctx: any, restaurantId: any, detail: string) {
+async function fail(ctx: ActionCtx, restaurantId: Id<"restaurants">, detail: string) {
   await ctx.runMutation(internal.restaurants.patchRestaurant, {
     restaurantId,
     status: "failed",
     statusDetail: detail,
   });
+}
+
+const PAUSED_DETAIL =
+  "Live menu checks are paused right now to protect the shared crawl budget. " +
+  "Nothing about this restaurant has been checked yet — try again later.";
+
+/**
+ * The gateway declined to spend credits and had no saved copy to fall back on.
+ * That is not a failure and it is certainly not an "all clear": leave the row
+ * in a plainly unfinished state with no verdict, and put back whatever status
+ * it held before a re-scan started, so a restaurant the kitchen already
+ * confirmed does not silently drop off the caregiver's safe list.
+ */
+async function pauseForBudget(
+  ctx: ActionCtx,
+  restaurantId: Id<"restaurants">,
+  resumeStatus?: Status,
+) {
+  await ctx.runMutation(internal.restaurants.patchRestaurant, {
+    restaurantId,
+    status: resumeStatus && resumeStatus !== "scraping" ? resumeStatus : "paused",
+    statusDetail: PAUSED_DETAIL,
+  });
+}
+
+/** Only a call that actually hit the network counts against the free tier. */
+async function bumpIfSpent(ctx: ActionCtx, cached: boolean) {
+  if (!cached) await ctx.runMutation(internal.usage.bump, { provider: "firecrawl" });
 }
 
 /**
@@ -156,6 +193,8 @@ export const discover = internalAction({
     restaurantId: v.id("restaurants"),
     query: v.optional(v.string()),
     url: v.optional(v.string()),
+    /** Status to put back if we decline to crawl (a re-scan of a saved row). */
+    resumeStatus: v.optional(statusV),
   },
   handler: async (ctx, args) => {
     const row = await ctx.runQuery(internal.restaurants.internalGet, {
@@ -192,8 +231,17 @@ export const discover = internalAction({
           statusDetail: `Searching the web for “${args.query}”…`,
         });
         // limit 3: search costs credits per batch of results.
-        const hits = await search(`${args.query} restaurant menu`, 3);
-        await ctx.runMutation(internal.usage.bump, { provider: "firecrawl" });
+        const found = await search(ctx, `${args.query} restaurant menu`, 3);
+        if (!found.data) {
+          if (found.reason === "budget") {
+            await pauseForBudget(ctx, args.restaurantId, args.resumeStatus);
+            return;
+          }
+          await fail(ctx, args.restaurantId, "Could not find a website for that restaurant.");
+          return;
+        }
+        await bumpIfSpent(ctx, found.cached);
+        const hits = found.data;
         const hit = hits.find((h) => h.url && !h.url.includes("google.")) ?? hits[0];
         if (!hit?.url) {
           await fail(ctx, args.restaurantId, "Could not find a website for that restaurant.");
@@ -208,7 +256,9 @@ export const discover = internalAction({
         return;
       }
 
-      // 2. Enumerate the site and pick the most menu-looking page.
+      // 2. Enumerate the site and pick the most menu-looking page. Skipping
+      //    this when the budget is out is harmless: we still have the page we
+      //    were given.
       let menuUrl = website;
       if (!/menu/i.test(website)) {
         await ctx.runMutation(internal.restaurants.patchRestaurant, {
@@ -216,9 +266,9 @@ export const discover = internalAction({
           statusDetail: "Looking for the menu page…",
         });
         try {
-          const links = await map(new URL(website).origin, 30);
-          await ctx.runMutation(internal.usage.bump, { provider: "firecrawl" });
-          const ranked = links
+          const mapped = await map(ctx, new URL(website).origin, 30);
+          await bumpIfSpent(ctx, mapped.cached);
+          const ranked = (mapped.data ?? [])
             .filter(Boolean)
             .map((u) => ({ u, s: looksLikeMenu(u) }))
             .filter((x) => x.s > 0)
@@ -240,21 +290,39 @@ export const discover = internalAction({
 
       let markdown = "";
       let parsed: Menu | null = null;
+      /** True when the dishes came out of our store rather than a live read. */
+      let fromSavedCopy = false;
 
       try {
-        const res = await scrapeJson(menuUrl, menuJsonSchema as any, MENU_PROMPT);
-        await ctx.runMutation(internal.usage.bump, { provider: "firecrawl" });
-        markdown = res.markdown ?? "";
-        parsed = normalizeMenu(res.json);
+        const res = await scrapeJson<any>(ctx, menuUrl, menuJsonSchema as any, MENU_PROMPT);
+        if (!res.data) {
+          if (res.reason === "budget") {
+            await pauseForBudget(ctx, args.restaurantId, args.resumeStatus);
+            return;
+          }
+        } else {
+          await bumpIfSpent(ctx, res.cached);
+          if (res.stale) fromSavedCopy = true;
+          markdown = res.data.markdown ?? "";
+          parsed = normalizeMenu(res.data.json);
+        }
       } catch {
         // Fall through to markdown + LLM.
       }
 
       if (!parsed) {
         if (!markdown) {
-          const res = await scrape(menuUrl);
-          await ctx.runMutation(internal.usage.bump, { provider: "firecrawl" });
-          markdown = res.markdown ?? "";
+          const res = await scrape(ctx, menuUrl);
+          if (!res.data) {
+            if (res.reason === "budget") {
+              await pauseForBudget(ctx, args.restaurantId, args.resumeStatus);
+              return;
+            }
+          } else {
+            await bumpIfSpent(ctx, res.cached);
+            if (res.stale) fromSavedCopy = true;
+            markdown = res.data.markdown ?? "";
+          }
         }
         if (!markdown.trim()) {
           await fail(
@@ -314,7 +382,9 @@ export const discover = internalAction({
         menuHash: hash,
         menuChanged: changed || undefined,
         lastScrapedAt: Date.now(),
-        statusDetail: `Found ${dishes.length} dishes. Checking them against the profile…`,
+        statusDetail: `Found ${dishes.length} dishes${
+          fromSavedCopy ? " in a saved copy of this menu" : ""
+        }. Checking them against the profile…`,
         model: modelId(),
       });
 
@@ -349,7 +419,24 @@ export const rescanAll = internalAction({
       await ctx.scheduler.runAfter(0, internal.menu.discover, {
         restaurantId: r._id,
         url: r.menuUrl,
+        resumeStatus: r.status,
       });
     }
+  },
+});
+
+/**
+ * Ops probe: exercise the crawl gateway directly, bypassing the per-call token,
+ * so the credit guard and the stored-result fallback can be checked on a live
+ * deployment without touching product state.
+ */
+export const budgetProbe = internalAction({
+  args: { url: v.string() },
+  handler: async (
+    ctx,
+    { url },
+  ): Promise<{ hasData: boolean; cached: boolean; stale: boolean; reason?: string }> => {
+    const r = await scrape(ctx, url);
+    return { hasData: Boolean(r.data), cached: r.cached, stale: r.stale, reason: r.reason };
   },
 });

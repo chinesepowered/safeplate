@@ -210,6 +210,9 @@ export const rescan = mutation({
     await ctx.scheduler.runAfter(0, internal.menu.discover, {
       restaurantId,
       url: r.menuUrl ?? r.website,
+      // If the crawl budget says no, put this row back where it was rather
+      // than dropping a confirmed restaurant off the caregiver's safe list.
+      resumeStatus: r.status,
     });
   },
 });
@@ -407,7 +410,7 @@ export const dueForRescan = internalQuery({
     return rows
       .filter((r) => r.menuUrl && (r.lastScrapedAt ?? 0) < olderThan)
       .slice(0, limit)
-      .map((r) => ({ _id: r._id, menuUrl: r.menuUrl as string }));
+      .map((r) => ({ _id: r._id, menuUrl: r.menuUrl as string, status: r.status }));
   },
 });
 
