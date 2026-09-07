@@ -27,7 +27,8 @@ export function firecrawl() {
 export const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Keep a stored result usable this long before we prefer a fresh one. */
-const CACHE_TTL_MS = Number(process.env.FIRECRAWL_CACHE_TTL_HOURS ?? 168) * 60 * 60 * 1000;
+const CACHE_TTL_MS = () =>
+  Number(process.env.FIRECRAWL_CACHE_TTL_HOURS ?? 168) * 60 * 60 * 1000;
 /** Never spend the pool below this. Reserved for judging. */
 const RESERVE = () => Number(process.env.FIRECRAWL_MIN_CREDITS ?? 1500);
 /** Ceiling for one day, so a bad actor cannot drain a month in an afternoon. */
@@ -92,7 +93,7 @@ async function gateway<T>(
     }
   };
 
-  if (hit && Date.now() - hit.fetchedAt < CACHE_TTL_MS) {
+  if (hit && Date.now() - hit.fetchedAt < CACHE_TTL_MS()) {
     return { data: parse(), cached: true, stale: false };
   }
 
@@ -137,12 +138,12 @@ export async function search(ctx: Ctx, query: string, limit = 5): Promise<CrawlR
   });
 }
 
-/** Scrape one page to markdown. About 1 credit. */
+/** Scrape one page to markdown. Billed around 2 credits. */
 export async function scrape(
   ctx: Ctx,
   url: string,
 ): Promise<CrawlResult<{ markdown: string; title?: string }>> {
-  return gateway(ctx, `scrape:${url}`, 1, async () => {
+  return gateway(ctx, `scrape:${url}`, 2, async () => {
     const res: any = await firecrawl().scrape(url, {
       formats: ["markdown"],
       maxAge: MAX_AGE_MS,
@@ -164,7 +165,7 @@ export async function scrapeJson<T = unknown>(
   schema: Record<string, unknown>,
   prompt: string,
 ): Promise<CrawlResult<{ markdown: string; title?: string; json: T | null }>> {
-  return gateway(ctx, `scrapeJson:${url}`, 6, async () => {
+  return gateway(ctx, `scrapeJson:${url}`, 10, async () => {
     const res: any = await firecrawl().scrape(url, {
       formats: ["markdown", { type: "json", schema, prompt }],
       maxAge: MAX_AGE_MS,
@@ -180,7 +181,7 @@ export async function scrapeJson<T = unknown>(
 
 /** List the URLs on a site (e.g. to find a menu or contact page). */
 export async function map(ctx: Ctx, url: string, limit = 30): Promise<CrawlResult<string[]>> {
-  return gateway(ctx, `map:${limit}:${url}`, 1, async () => {
+  return gateway(ctx, `map:${limit}:${url}`, 2, async () => {
     const res: any = await firecrawl().map(url, { limit });
     const links = res?.links ?? res?.data ?? [];
     return (Array.isArray(links) ? links : []).map((l: any) =>
