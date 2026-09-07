@@ -4,7 +4,15 @@ import { api } from "../convex/_generated/api";
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import { Link, navigate } from "./router";
 import { VerdictMap, type Pin } from "./Map";
-import { Card, CountBar, SafetyNote, Spinner, VerdictChip, timeAgo } from "./ui";
+import {
+  Card,
+  CountBar,
+  CrawlPausedNote,
+  SafetyNote,
+  Spinner,
+  VerdictChip,
+  timeAgo,
+} from "./ui";
 
 const ALLERGENS = [
   "peanut",
@@ -186,6 +194,8 @@ function statusLabel(r: Row) {
       return "They cannot accommodate";
     case "failed":
       return "Could not read the menu";
+    case "paused":
+      return "Not checked yet — crawling paused";
     default:
       return "Unclear";
   }
@@ -345,6 +355,8 @@ export function Dashboard() {
           {safeDishes === 1 ? "" : "es"} {profile.personName} can order.
         </p>
       )}
+
+      <CrawlPausedNote className="mt-4" />
 
       <form onSubmit={submit} className="mt-6 flex flex-wrap gap-3">
         <input

@@ -5,6 +5,7 @@ import type { Id } from "../convex/_generated/dataModel";
 import { Link } from "./router";
 import {
   Card,
+  CrawlPausedNote,
   SafetyNote,
   Spinner,
   VerdictChip,
@@ -13,6 +14,10 @@ import {
   type Verdict,
   timeAgo,
 } from "./ui";
+
+const PAUSED_FALLBACK =
+  "Live menu checks are paused right now to protect the shared crawl budget. " +
+  "Nothing about this restaurant has been checked yet — try again later.";
 
 export function Restaurant({ id }: { id: string }) {
   const data = useQuery(api.restaurants.detail, { restaurantId: id as Id<"restaurants"> });
@@ -139,6 +144,20 @@ export function Restaurant({ id }: { id: string }) {
         </p>
       )}
 
+      {r.status === "paused" && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-stone-100 px-4 py-3 text-sm text-stone-700 ring-1 ring-stone-300/60">
+          <span>{r.statusDetail ?? PAUSED_FALLBACK}</span>
+          <button
+            onClick={() => void run(() => rescan({ restaurantId: r._id }))}
+            className="shrink-0 rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-700 hover:border-stone-400"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
+      <CrawlPausedNote className="mt-3" />
+
       {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
 
       {/* ---------------------------------------------------------- questions */}
@@ -220,7 +239,7 @@ export function Restaurant({ id }: { id: string }) {
               {r.askedAt ? "Ask again" : "Ask the restaurant"}
             </button>
           </div>
-          {r.statusDetail && r.status !== "failed" && (
+          {r.statusDetail && r.status !== "failed" && r.status !== "paused" && (
             <p className="mt-2 text-xs text-stone-500">{r.statusDetail}</p>
           )}
         </Card>

@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { useQuery } from "convex/react";
+import { api } from "../convex/_generated/api";
 
 export type Verdict = "safe" | "risky" | "unsafe" | "unclear";
 
@@ -122,6 +124,25 @@ export function SafetyNote({ className = "" }: { className?: string }) {
       SafePlate helps you ask better questions. It is not medical advice, and it cannot
       see inside a kitchen. Nothing is marked confirmed safe unless the restaurant said so
       in writing — always tell staff about the allergy when you order.
+    </p>
+  );
+}
+
+/**
+ * Firecrawl bills in credits and the pool is shared. When it is close to the
+ * floor we stop crawling and serve what we already read, which is a calm fact
+ * rather than an error — but it has to be said out loud, because a menu we
+ * could not re-read is exactly the kind of thing a parent should know about.
+ */
+export function CrawlPausedNote({ className = "" }: { className?: string }) {
+  const crawl = useQuery(api.crawlCache.status);
+  if (!crawl || crawl.live) return null;
+  return (
+    <p
+      className={`rounded-xl bg-stone-100 px-4 py-3 text-sm text-stone-700 ring-1 ring-stone-300/60 ${className}`}
+    >
+      Showing saved menu data — live menu checks are paused to protect the shared crawl
+      budget.
     </p>
   );
 }
