@@ -10,7 +10,11 @@ export const verdictV = v.union(
   v.literal("unclear"),
 );
 
-/** Where a restaurant is in the pipeline. */
+/**
+ * Where a restaurant is in the pipeline. "paused" is not a failure: it means we
+ * declined to spend shared crawl credits on it, so there is nothing to show yet
+ * and the parent can retry later. It never carries a verdict.
+ */
 export const statusV = v.union(
   v.literal("scraping"),
   v.literal("reviewed"),
@@ -19,6 +23,7 @@ export const statusV = v.union(
   v.literal("avoid"),
   v.literal("unclear"),
   v.literal("failed"),
+  v.literal("paused"),
 );
 
 /**
@@ -173,4 +178,24 @@ export default defineSchema({
     order: v.number(),
     answeredAt: v.optional(v.number()),
   }).index("by_restaurant", ["restaurantId"]),
+
+  // ------------------------------------------------------- crawl budget guard
+
+  /** Every Firecrawl result we have ever fetched, kept so a repeat costs nothing
+   * and so the app still has a menu to show once the credit pool is reserved. */
+  crawlCache: defineTable({
+    key: v.string(),
+    payload: v.string(),
+    credits: v.number(),
+    fetchedAt: v.number(),
+  }).index("by_key", ["key"]),
+
+  /** Authoritative Firecrawl balance plus today's spend, in credits. */
+  crawlBudget: defineTable({
+    key: v.string(),
+    remainingCredits: v.number(),
+    checkedAt: v.number(),
+    day: v.string(),
+    spentToday: v.number(),
+  }).index("by_key", ["key"]),
 });
