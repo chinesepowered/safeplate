@@ -11,7 +11,7 @@ import { internalMutation, internalQuery, query } from "./_generated/server";
  *     answer to show;
  *   - a spend guard denominated in CREDITS, because Firecrawl bills in credits
  *     while a rate limiter counts calls, and one JSON-extraction scrape is
- *     worth about ten plain ones.
+ *     budgeted at five times a plain one (10 credits against 2).
  */
 
 export const get = internalQuery({
