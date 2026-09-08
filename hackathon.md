@@ -4,7 +4,7 @@
 - **Event:** Convex All Gas Hackathon
 - **What it does:** Reads a restaurant's real menu against a child's allergy profile, emails the kitchen the questions a menu cannot answer, and turns the reply into per-dish verdicts and a shareable safe list.
 - **Live app:** https://valiant-fox-223.convex.site
-- **Repo:** none
+- **Repo:** https://github.com/chinesepowered/safeplate
 - **Frontend:** Convex static hosting
 - **Convex deployment:** https://valiant-fox-223.convex.cloud
 - **Components:** @convex-dev/static-hosting, @convex-dev/rate-limiter, @convex-dev/agent
