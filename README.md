@@ -2,7 +2,7 @@
 
 **Eating out with a serious food allergy, without having to take anyone's word for it.**
 
-🌐 **[Live demo](https://valiant-fox-223.convex.site)** · 🎬 Demo video: `TODO: video link` · 📋 [Build log](hackathon.md)
+🌐 **[Live demo](https://valiant-fox-223.convex.site)** · 🎬 Demo video: [Watch the demo](https://www.youtube.com/watch?v=nzArirVettI) · 📋 [Build log](hackathon.md)
 
 > The demo runs on free tiers of Convex, OpenAI, Firecrawl and AgentMail, so under load some features may be rate-limited — the video shows the full flow.
 
